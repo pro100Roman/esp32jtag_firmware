@@ -29,6 +29,7 @@
 #include "network_mngr_ota.h"
 #include "web_server.h"
 #include "uart_websocket.h"
+#include "cmsis_dap_tcp.h"
 #include "../components/lcd/lcd_library.h"
 #include "GUI_Paint.h"
 #include "gdb_main.h"
@@ -1022,18 +1023,24 @@ static void draw_wifi_startup_info(void)
         Paint_DrawString_EN(X_OFFSET, 10 + 24 * 2, "SSID:", &CURR_FONT, BLACK, YELLOW);
         Paint_DrawString_EN(X_OFFSET + 17 * 5, 10 + 24 * 2, g_app_params.wifi_ssid, &CURR_FONT, BLACK, MAGENTA);
     }
-    // Port row: "PORT XVC:2542 GDB:4242"
+    // Debug server ports.
     Paint_DrawString_EN(X_OFFSET, 10+24*4, "PORT ", &CURR_FONT, BLACK, YELLOW);
     Paint_DrawString_EN(X_OFFSET + 5*PAINT_CHAR_WIDTH,  10+24*4, "XVC:", &CURR_FONT, BLACK, BLUE);
     Paint_DrawString_EN(X_OFFSET + 9*PAINT_CHAR_WIDTH,  10+24*4, "2542", &CURR_FONT, BLACK, MAGENTA);
     Paint_DrawString_EN(X_OFFSET + 13*PAINT_CHAR_WIDTH, 10+24*4, "GDB:", &CURR_FONT, BLACK, BLUE);
     Paint_DrawString_EN(X_OFFSET + 17*PAINT_CHAR_WIDTH, 10+24*4, "4242", &CURR_FONT, BLACK, MAGENTA);
+
+    char cmsis_dap_port[6];
+    snprintf(cmsis_dap_port, sizeof(cmsis_dap_port), "%u", CMSIS_DAP_TCP_PORT);
+    Paint_DrawString_EN(X_OFFSET, 10+24*5, "CMSIS-DAP:", &CURR_FONT, BLACK, BLUE);
+    Paint_DrawString_EN(X_OFFSET + 10*PAINT_CHAR_WIDTH, 10+24*5,
+        cmsis_dap_port, &CURR_FONT, BLACK, MAGENTA);
 }
 
 /* Draw PA/PB/PC/PD port configuration on LCD. */
 static void draw_port_cfg_info(void)
 {
-    uint32_t y = 10 + 24*5;
+    uint32_t y = 10 + 24*6;
     Paint_DrawString_EN(X_OFFSET, y, "PA:          PB:", &CURR_FONT, BLACK, YELLOW);
     Paint_DrawString_EN(X_OFFSET + 3*PAINT_CHAR_WIDTH, y, "LA", &CURR_FONT, BLACK, MAGENTA);
     Paint_DrawString_EN(X_OFFSET + 16*PAINT_CHAR_WIDTH, y,
@@ -1243,6 +1250,7 @@ _wait:
 
     if (!disable_usb_dap) {
         xTaskCreate(cherry_dap_task, "cherry_dap_task", 4096, NULL, 5, NULL);
+        xTaskCreate(cmsis_dap_tcp_server_task, "cmsis_dap_tcp", 4096, NULL, 6, NULL);
     } else {
         ESP_LOGI(TAG, "USB based CMSIS-DAP and COM port is disabled");
     }

@@ -101,11 +101,16 @@ extern struct usbd_endpoint cdc_in_ep;
 extern chry_ringbuffer_t g_uartrx;
 extern chry_ringbuffer_t g_usbrx;
 
+void chry_dap_command_init(void);
+
+uint32_t chry_dap_execute_command(const uint8_t *request, uint8_t *response);
+
 __STATIC_INLINE void chry_dap_init(uint8_t busid, uint32_t reg_base)
 {
     chry_ringbuffer_init(&g_uartrx, uartrx_ringbuffer, CONFIG_UARTRX_RINGBUF_SIZE);
     chry_ringbuffer_init(&g_usbrx, usbrx_ringbuffer, CONFIG_USBRX_RINGBUF_SIZE);
 
+    chry_dap_command_init();
     DAP_Setup();
 
     usbd_desc_register(0, &cmsisdap_descriptor);

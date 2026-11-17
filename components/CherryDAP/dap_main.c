@@ -1,6 +1,7 @@
 #include "dap_main.h"
 #include "DAP_config.h"
 #include "DAP.h"
+#include "freertos/semphr.h"
 
 
 #define USB_CONFIG_SIZE (9 + CMSIS_DAP_INTERFACE_SIZE + CDC_ACM_DESCRIPTOR_LEN + CONFIG_MSC_DESCRIPTOR_LEN)
@@ -191,6 +192,8 @@ static volatile uint8_t USB_ResponseIdle = 1;    // Response Idle  Flag
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t USB_Request[DAP_PACKET_COUNT][DAP_PACKET_SIZE];  // Request  Buffer
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t USB_Response[DAP_PACKET_COUNT][DAP_PACKET_SIZE]; // Response Buffer
 static uint16_t USB_RespSize[DAP_PACKET_COUNT];                                                        // Response Size
+
+static SemaphoreHandle_t dap_command_mutex;
 
 volatile struct cdc_line_coding g_cdc_lincoding;
 volatile uint8_t config_uart = 0;
@@ -390,8 +393,8 @@ void chry_dap_handle(void)
         }
 
         // Execute DAP Command (process request and prepare response)
-        USB_RespSize[USB_ResponseIndexI] =
-                (uint16_t) DAP_ExecuteCommand(USB_Request[USB_RequestIndexO], USB_Response[USB_ResponseIndexI]);
+        USB_RespSize[USB_ResponseIndexI] = (uint16_t) chry_dap_execute_command(
+                USB_Request[USB_RequestIndexO], USB_Response[USB_ResponseIndexI]);
 
         // Update Request Index and Count
         USB_RequestIndexO++;
@@ -427,6 +430,23 @@ void chry_dap_handle(void)
             }
         }
     }
+}
+
+void chry_dap_command_init(void)
+{
+    if (dap_command_mutex == NULL) {
+        dap_command_mutex = xSemaphoreCreateMutex();
+        configASSERT(dap_command_mutex != NULL);
+    }
+}
+
+uint32_t chry_dap_execute_command(const uint8_t *request, uint8_t *response)
+{
+    configASSERT(dap_command_mutex != NULL);
+    xSemaphoreTake(dap_command_mutex, portMAX_DELAY);
+    const uint32_t response_size = DAP_ExecuteCommand(request, response);
+    xSemaphoreGive(dap_command_mutex);
+    return response_size;
 }
 
 void usbd_cdc_acm_set_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
