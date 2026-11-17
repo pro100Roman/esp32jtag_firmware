@@ -62,7 +62,8 @@ static void cherry_dap_task(void *arg) {
             chry_dap_usb2uart_handle();
         }
         // ESP_LOGI("DAP", "cherry_dap_task");
-        vTaskDelay(1); // Optional yield if needed, but handle might be blocking or polling
+        //vTaskDelay(1); // Optional yield if needed, but handle might be blocking or polling
+        taskYIELD();
     }
 }
 
@@ -583,6 +584,7 @@ static void init_idf_components(void) {
         disable_usb_dap = (strcmp(disable_dap_val, "1") == 0);
         free(disable_dap_val);
     }
+    disable_usb_dap = false; // force enable for now, until we have a proper way to disable it
 
     if (!disable_usb_dap) {
         chry_dap_init(0, ESP_USBD_BASE);
@@ -1237,6 +1239,7 @@ _wait:
         disable_usb_dap = (strcmp(disable_dap_val, "1") == 0);
         free(disable_dap_val);
     }
+    disable_usb_dap = false; // force enable for now, until we have a proper way to disable it
 
     if (!disable_usb_dap) {
         xTaskCreate(cherry_dap_task, "cherry_dap_task", 4096, NULL, 5, NULL);
