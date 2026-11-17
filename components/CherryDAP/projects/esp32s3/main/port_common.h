@@ -44,7 +44,7 @@
 //#define DEV_UART0_RX                GPIO_NUM_3
 //#define RX_BUF_SIZE                 1024
 
-#define DAP_CPU_CLOCK 0U
+#define DAP_CPU_CLOCK (CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 1000000U)
 
 void dap_platform_init(void);
 void dap_gpio_init(void);
