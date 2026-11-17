@@ -1136,10 +1136,16 @@ esp_err_t get_credentials_handler(httpd_req_t *req) {
 
 static void get_filename_from_path(const char *path, char *filename, size_t filename_len)
 {
+    if (filename_len == 0) {
+        return;
+    }
+
     const char *last_slash = strrchr(path, '/');
     const char *src = last_slash ? last_slash + 1 : path;
-    strncpy(filename, src, filename_len - 1);
-    filename[filename_len - 1] = '\0';
+    const size_t copy_len = strnlen(src, filename_len - 1);
+
+    memcpy(filename, src, copy_len);
+    filename[copy_len] = '\0';
 }
 
 static esp_err_t file_upload_handler(httpd_req_t *req) {
