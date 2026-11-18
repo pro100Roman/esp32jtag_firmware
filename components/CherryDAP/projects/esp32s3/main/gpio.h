@@ -7,6 +7,8 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/gpio.h"
+#include "hal/gpio_ll.h"
+#include "soc/gpio_struct.h"
 
 enum
 {
@@ -37,10 +39,10 @@ static inline void gpio_set_mode(uint32_t pin, uint32_t mode)
 
 static inline void gpio_write(uint32_t pin, uint32_t level)
 {
-    gpio_set_level(pin, level);
+    gpio_ll_set_level(&GPIO, pin, level);
 }
 
 static inline int gpio_read(uint32_t pin)
 {
-    return gpio_get_level(pin);
+    return gpio_ll_get_level(&GPIO, pin);
 }
