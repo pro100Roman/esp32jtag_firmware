@@ -21,20 +21,17 @@ static inline void gpio_set_mode(uint32_t pin, uint32_t mode)
 {
     if (mode == GPIO_INPUT_MODE)
     {
-        gpio_set_direction(pin,  GPIO_MODE_INPUT);
+        gpio_ll_output_disable(&GPIO, pin);
     }
     else if (mode == GPIO_OUTPUT_MODE)
     {
-        gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+        gpio_ll_output_enable(&GPIO, pin);
     }
     else if (mode == GPIO_INPUT_PP_MODE)
     {
         gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
-        gpio_set_direction(pin,  GPIO_MODE_INPUT);
-        
+        gpio_ll_output_disable(&GPIO, pin);
     }
-
-
 }
 
 static inline void gpio_write(uint32_t pin, uint32_t level)

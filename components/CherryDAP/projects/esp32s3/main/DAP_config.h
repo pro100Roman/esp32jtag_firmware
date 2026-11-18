@@ -453,7 +453,9 @@ __STATIC_INLINE void PIN_SWDIO_OUT_ENABLE(void)
 {
     //gpio_write(PIN_SWDIO_TMS, 1U);
     gpio_set_mode(PIN_SWDIO_TMS, GPIO_OUTPUT_MODE);
-    gpio_set_level(SWDIO_RDnWR_PIN, 0);
+    if (AEL_BMP_HAS_SWDIO_RDNWR) {
+        gpio_write(SWDIO_RDnWR_PIN, 0U);
+    }
 }
 
 /** SWDIO I/O pin: Switch to Input mode (used in SWD mode only).
@@ -464,7 +466,9 @@ __STATIC_INLINE void PIN_SWDIO_OUT_DISABLE(void)
 {
     //gpio_write(PIN_SWDIO_TMS, 1U);
     gpio_set_mode(PIN_SWDIO_TMS, GPIO_INPUT_MODE);
-    gpio_set_level(SWDIO_RDnWR_PIN, 1);
+    if (AEL_BMP_HAS_SWDIO_RDNWR) {
+        gpio_write(SWDIO_RDnWR_PIN, 1U);
+    }
 }
 
 // TDI Pin I/O ---------------------------------------------
