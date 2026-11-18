@@ -17,9 +17,23 @@
 #define CMSIS_DAP_TCP_REQUEST_TYPE 1U
 #define CMSIS_DAP_TCP_RESPONSE_TYPE 2U
 #define CMSIS_DAP_TCP_RETRY_DELAY_MS 1000U
+#define CMSIS_DAP_TCP_PACKET_SIZE 1024U
+#define CMSIS_DAP_TCP_PACKET_COUNT 32U
+// Keep the host-side TCP window deep enough to hide network latency, but execute no more SWD
+// commands back-to-back than the stable USB CMSIS-DAP path does before yielding.
+#define CMSIS_DAP_TCP_EXECUTION_BATCH_SIZE DAP_PACKET_COUNT
+#define CMSIS_DAP_COMMAND_INFO 0x00U
+#define CMSIS_DAP_INFO_PACKET_COUNT 0xFEU
+#define CMSIS_DAP_INFO_PACKET_SIZE 0xFFU
 
 static const char *TAG = "CMSIS_DAP_TCP";
 static const uint8_t CMSIS_DAP_TCP_SIGNATURE[4] = {'D', 'A', 'P', 0};
+
+typedef enum {
+    CMSIS_DAP_REQUEST_RECEIVED,
+    CMSIS_DAP_REQUEST_CLOSED,
+    CMSIS_DAP_REQUEST_INVALID,
+} cmsis_dap_request_result_t;
 
 static bool receive_all(int socket_fd, uint8_t *buffer, size_t length)
 {
@@ -60,49 +74,125 @@ static bool send_all(int socket_fd, const uint8_t *buffer, size_t length)
     return true;
 }
 
+static cmsis_dap_request_result_t receive_request(int socket_fd, uint8_t *request)
+{
+    uint8_t header[CMSIS_DAP_TCP_HEADER_SIZE];
+    if (!receive_all(socket_fd, header, sizeof(header))) {
+        return CMSIS_DAP_REQUEST_CLOSED;
+    }
+    if (memcmp(header, CMSIS_DAP_TCP_SIGNATURE, sizeof(CMSIS_DAP_TCP_SIGNATURE)) != 0 ||
+        header[6] != CMSIS_DAP_TCP_REQUEST_TYPE) {
+        ESP_LOGW(TAG, "Invalid CMSIS-DAP TCP request header");
+        return CMSIS_DAP_REQUEST_INVALID;
+    }
+
+    const size_t request_length = (size_t) header[4] | ((size_t) header[5] << 8U);
+    if (request_length == 0 || request_length > CMSIS_DAP_TCP_PACKET_SIZE) {
+        ESP_LOGW(TAG, "Invalid CMSIS-DAP TCP payload length: %u", (unsigned) request_length);
+        return CMSIS_DAP_REQUEST_INVALID;
+    }
+
+    memset(request, 0, CMSIS_DAP_TCP_PACKET_SIZE);
+    if (!receive_all(socket_fd, request, request_length)) {
+        return CMSIS_DAP_REQUEST_CLOSED;
+    }
+    return CMSIS_DAP_REQUEST_RECEIVED;
+}
+
+static bool request_is_buffered(int socket_fd, bool *client_closed)
+{
+    uint8_t next_byte;
+    while (true) {
+        const ssize_t count = recv(socket_fd, &next_byte, sizeof(next_byte), MSG_PEEK | MSG_DONTWAIT);
+        if (count > 0) {
+            return true;
+        }
+        if (count == 0) {
+            *client_closed = true;
+            return false;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return false;
+        }
+        *client_closed = true;
+        return false;
+    }
+}
+
 static bool handle_client(int socket_fd)
 {
-    uint8_t request[DAP_PACKET_SIZE];
-    uint8_t response_frame[CMSIS_DAP_TCP_HEADER_SIZE + DAP_PACKET_SIZE];
+    static uint8_t request[CMSIS_DAP_TCP_PACKET_SIZE];
+    static uint8_t response_batch[
+        CMSIS_DAP_TCP_EXECUTION_BATCH_SIZE *
+        (CMSIS_DAP_TCP_HEADER_SIZE + CMSIS_DAP_TCP_PACKET_SIZE)];
 
     while (true) {
-        uint8_t header[CMSIS_DAP_TCP_HEADER_SIZE];
-        if (!receive_all(socket_fd, header, sizeof(header))) {
+        size_t response_batch_length = 0;
+        bool client_closed = false;
+
+        for (size_t packet = 0; packet < CMSIS_DAP_TCP_EXECUTION_BATCH_SIZE; ++packet) {
+            const cmsis_dap_request_result_t request_result = receive_request(socket_fd, request);
+            if (request_result == CMSIS_DAP_REQUEST_CLOSED) {
+                client_closed = true;
+                break;
+            }
+            if (request_result == CMSIS_DAP_REQUEST_INVALID) {
+                return false;
+            }
+
+            uint8_t *response_frame = response_batch + response_batch_length;
+            const uint16_t response_length = (uint16_t) chry_dap_execute_command(
+                request, response_frame + CMSIS_DAP_TCP_HEADER_SIZE);
+            if (response_length > CMSIS_DAP_TCP_PACKET_SIZE) {
+                ESP_LOGE(TAG, "CMSIS-DAP response is too large: %u", (unsigned) response_length);
+                return false;
+            }
+
+            // The USB interface remains a 64-byte full-speed CMSIS-DAP endpoint, but the TCP
+            // transport is not constrained by the USB endpoint packet size. Advertising the
+            // larger TCP buffer lets hosts use substantially larger DAP_TransferBlock commands.
+            if (request[0] == CMSIS_DAP_COMMAND_INFO &&
+                request[1] == CMSIS_DAP_INFO_PACKET_SIZE) {
+                response_frame[CMSIS_DAP_TCP_HEADER_SIZE + 1U] = 2U;
+                response_frame[CMSIS_DAP_TCP_HEADER_SIZE + 2U] =
+                    (uint8_t) CMSIS_DAP_TCP_PACKET_SIZE;
+                response_frame[CMSIS_DAP_TCP_HEADER_SIZE + 3U] =
+                    (uint8_t) (CMSIS_DAP_TCP_PACKET_SIZE >> 8U);
+            } else if (request[0] == CMSIS_DAP_COMMAND_INFO &&
+                       request[1] == CMSIS_DAP_INFO_PACKET_COUNT) {
+                response_frame[CMSIS_DAP_TCP_HEADER_SIZE + 1U] = 1U;
+                response_frame[CMSIS_DAP_TCP_HEADER_SIZE + 2U] =
+                    CMSIS_DAP_TCP_PACKET_COUNT;
+            }
+
+            memcpy(response_frame, CMSIS_DAP_TCP_SIGNATURE, sizeof(CMSIS_DAP_TCP_SIGNATURE));
+            response_frame[4] = (uint8_t) response_length;
+            response_frame[5] = (uint8_t) (response_length >> 8U);
+            response_frame[6] = CMSIS_DAP_TCP_RESPONSE_TYPE;
+            response_frame[7] = 0;
+            response_batch_length += CMSIS_DAP_TCP_HEADER_SIZE + response_length;
+
+            if (packet + 1U == CMSIS_DAP_TCP_EXECUTION_BATCH_SIZE ||
+                !request_is_buffered(socket_fd, &client_closed)) {
+                break;
+            }
+        }
+
+        if (response_batch_length != 0 &&
+            !send_all(socket_fd, response_batch, response_batch_length)) {
             return true;
         }
-        if (memcmp(header, CMSIS_DAP_TCP_SIGNATURE, sizeof(CMSIS_DAP_TCP_SIGNATURE)) != 0 ||
-            header[6] != CMSIS_DAP_TCP_REQUEST_TYPE) {
-            ESP_LOGW(TAG, "Invalid CMSIS-DAP TCP request header");
-            return false;
-        }
-
-        const size_t request_length = (size_t) header[4] | ((size_t) header[5] << 8U);
-        if (request_length == 0 || request_length > sizeof(request)) {
-            ESP_LOGW(TAG, "Invalid CMSIS-DAP TCP payload length: %u", (unsigned) request_length);
-            return false;
-        }
-
-        memset(request, 0, sizeof(request));
-        if (!receive_all(socket_fd, request, request_length)) {
+        if (client_closed) {
             return true;
         }
 
-        const uint16_t response_length = (uint16_t) chry_dap_execute_command(
-            request, response_frame + CMSIS_DAP_TCP_HEADER_SIZE);
-        if (response_length > DAP_PACKET_SIZE) {
-            ESP_LOGE(TAG, "CMSIS-DAP response is too large: %u", (unsigned) response_length);
-            return false;
-        }
-
-        memcpy(response_frame, CMSIS_DAP_TCP_SIGNATURE, sizeof(CMSIS_DAP_TCP_SIGNATURE));
-        response_frame[4] = (uint8_t) response_length;
-        response_frame[5] = (uint8_t) (response_length >> 8U);
-        response_frame[6] = CMSIS_DAP_TCP_RESPONSE_TYPE;
-        response_frame[7] = 0;
-
-        if (!send_all(socket_fd, response_frame, CMSIS_DAP_TCP_HEADER_SIZE + response_length)) {
-            return true;
-        }
+        // USB returns to cherry_dap_task after draining at most DAP_PACKET_COUNT requests, where
+        // that task yields. Mirror the same execution boundary for TCP while keeping later
+        // requests queued in the socket, so Wi-Fi latency is hidden without one long SWD burst.
+        taskYIELD();
     }
 }
 
