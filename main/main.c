@@ -1035,9 +1035,13 @@ static void draw_wifi_startup_info(void)
     const uint32_t details_y = 10 + 24*5;
     Paint_DrawString_EN(X_OFFSET, details_y, "DAP:", &CURR_FONT, BLACK, BLUE);
     Paint_DrawString_EN(X_OFFSET + 4*PAINT_CHAR_WIDTH, details_y, dap_port, &CURR_FONT, BLACK, MAGENTA);
-    Paint_DrawString_EN(X_OFFSET + 10*PAINT_CHAR_WIDTH, details_y, "FW:", &CURR_FONT, BLACK, BLUE);
-    Paint_DrawString_EN(X_OFFSET + 13*PAINT_CHAR_WIDTH, details_y,
-        MAIN_GIT_COMMIT, &CURR_FONT, BLACK, MAGENTA);
+
+    char firmware_version[16];
+    snprintf(firmware_version, sizeof(firmware_version), "FW:%s", MAIN_GIT_COMMIT);
+    const uint32_t firmware_width = strlen(firmware_version) * CURR_FONT.Width;
+    const uint32_t firmware_x = firmware_width < LCD_WIDTH ? LCD_WIDTH - firmware_width : 0;
+    Paint_DrawString_EN(firmware_x, LCD_HEIGHT - CURR_FONT.Height,
+        firmware_version, &CURR_FONT, BLACK, MAGENTA);
 }
 
 /* Draw PA/PB/PC/PD port configuration on LCD. */
