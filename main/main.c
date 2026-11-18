@@ -102,6 +102,20 @@ uint8_t *gbl_spi_rxbuf = NULL;
 static const char *TAG = "MAIN";
 static const ael_board_profile_t *g_board = NULL;
 
+static bool usb_dap_is_disabled(void)
+{
+    char *stored_value = NULL;
+    bool disabled = false;
+
+    if (storage_alloc_and_read(DISABLE_USB_DAP_KEY, &stored_value) == ESP_OK &&
+        stored_value != NULL) {
+        disabled = strcmp(stored_value, "1") == 0;
+        free(stored_value);
+    }
+
+    return disabled;
+}
+
 
 //configurations for each ESP32JTAG 4 ports
 uint8_t gbl_pa_cfg = 0;
@@ -579,18 +593,16 @@ static void init_idf_components(void) {
     esp_netif_init();
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    char *disable_dap_val = NULL;
-    bool disable_usb_dap = true;  /* default: disabled */
-    if (storage_alloc_and_read(DISABLE_USB_DAP_KEY, &disable_dap_val) == ESP_OK && disable_dap_val) {
-        disable_usb_dap = (strcmp(disable_dap_val, "1") == 0);
-        free(disable_dap_val);
-    }
-    disable_usb_dap = false; // force enable for now, until we have a proper way to disable it
+    const bool disable_usb_dap = usb_dap_is_disabled();
 
     if (!disable_usb_dap) {
         chry_dap_init(0, ESP_USBD_BASE);
     } else {
-        ESP_LOGI(TAG, "Skipping chry_dap_init because USB DAP is disabled.");
+        /* The TCP transport uses the same CMSIS-DAP command engine but does not
+         * need the USB descriptors or controller. */
+        chry_dap_command_init();
+        DAP_Setup();
+        ESP_LOGI(TAG, "USB CMSIS-DAP and COM interfaces are disabled");
     }
     // Redirect logs to USB CDC
     //esp_log_set_vprintf(usb_log_vprintf);
@@ -1248,20 +1260,14 @@ void app_main(void) {
 
 _wait:
 
-    char *disable_dap_val = NULL;
-    bool disable_usb_dap = true;  /* default: disabled */
-    if (storage_alloc_and_read(DISABLE_USB_DAP_KEY, &disable_dap_val) == ESP_OK && disable_dap_val) {
-        disable_usb_dap = (strcmp(disable_dap_val, "1") == 0);
-        free(disable_dap_val);
-    }
-    disable_usb_dap = false; // force enable for now, until we have a proper way to disable it
+    const bool disable_usb_dap = usb_dap_is_disabled();
 
     if (!disable_usb_dap) {
         xTaskCreate(cherry_dap_task, "cherry_dap_task", 4096, NULL, 5, NULL);
-        xTaskCreate(cmsis_dap_tcp_server_task, "cmsis_dap_tcp", 4096, NULL, 6, NULL);
     } else {
-        ESP_LOGI(TAG, "USB based CMSIS-DAP and COM port is disabled");
+        ESP_LOGI(TAG, "USB CMSIS-DAP and COM task is disabled");
     }
+    xTaskCreate(cmsis_dap_tcp_server_task, "cmsis_dap_tcp", 4096, NULL, 6, NULL);
 
     ESP_LOGI(TAG, "[APP] Free memory: %lu bytes", esp_get_free_heap_size());
     while (true) {

@@ -757,8 +757,14 @@ esp_err_t set_credentials_handler(httpd_req_t *req) {
     char *uartParity_str = get_cjson_string(uartParity);
     char *uartPortSel_str = get_cjson_string(uartPortSel);
     bool disableUsbDapCom_val = false;
-    if (disableUsbDapCom && cJSON_IsTrue(disableUsbDapCom)) {
-        disableUsbDapCom_val = true;
+    if (disableUsbDapCom) {
+        if (!cJSON_IsBool(disableUsbDapCom)) {
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                "disableUsbDapCom must be a boolean");
+            return ESP_FAIL;
+        }
+        disableUsbDapCom_val = cJSON_IsTrue(disableUsbDapCom);
     }
 
     // Log the received values (placeholder for actual logic)
@@ -920,18 +926,22 @@ esp_err_t set_credentials_handler(httpd_req_t *req) {
         reboot_required = true;
     }
 
-    // Disable USB DAP is fixed to true — ignore incoming value
-    {
+    // USB CMSIS-DAP/COM changes take effect after reboot. The network
+    // CMSIS-DAP transport remains available in either state.
+    if (disableUsbDapCom) {
         char *stored_disable_dap = NULL;
+        const char *requested_disable_dap = disableUsbDapCom_val ? "1" : "0";
         if (storage_alloc_and_read(DISABLE_USB_DAP_KEY, &stored_disable_dap) == ESP_OK && stored_disable_dap) {
-            if (strcmp(stored_disable_dap, "1") != 0) {
-                ESP_LOGI(TAG, "Disable USB DAP forced to enabled (was %s)", stored_disable_dap);
+            if (strcmp(stored_disable_dap, requested_disable_dap) != 0) {
+                ESP_LOGI(TAG, "Disable USB DAP changed: %s -> %s",
+                         stored_disable_dap, requested_disable_dap);
                 reboot_required = true;
             }
             free(stored_disable_dap);
         } else {
-            ESP_LOGI(TAG, "Disable USB DAP set for the first time (forced enabled).");
-            reboot_required = true;
+            /* Missing key means the default (USB enabled). Only disabling it
+             * changes the effective runtime configuration. */
+            reboot_required = disableUsbDapCom_val;
         }
     }
 
@@ -959,7 +969,10 @@ esp_err_t set_credentials_handler(httpd_req_t *req) {
         if (uartStopBits_str) storage_write_session(h, UART_STOP_BITS_KEY, uartStopBits_str, strlen(uartStopBits_str));
         if (uartParity_str) storage_write_session(h, UART_PARITY_KEY, uartParity_str, strlen(uartParity_str));
         storage_write_session(h, UART_PORT_SEL_KEY, "1", 1);
-        storage_write_session(h, DISABLE_USB_DAP_KEY, "1", 1);
+        if (disableUsbDapCom) {
+            const char *disable_dap_value = disableUsbDapCom_val ? "1" : "0";
+            storage_write_session(h, DISABLE_USB_DAP_KEY, disable_dap_value, 1);
+        }
 
         storage_close_session(h);
     }
@@ -1121,8 +1134,12 @@ esp_err_t get_credentials_handler(httpd_req_t *req) {
         cJSON_AddStringToObject(root, "uartParity", "n"); // 'n' for None
     }
 
-    // Fixed value: USB DAP/COM is always disabled
-    cJSON_AddBoolToObject(root, "disableUsbDapCom", true);
+    bool disable_usb_dap = false;
+    if (storage_alloc_and_read(DISABLE_USB_DAP_KEY, &val) == ESP_OK && val) {
+        disable_usb_dap = strcmp(val, "1") == 0;
+        free(val); val = NULL;
+    }
+    cJSON_AddBoolToObject(root, "disableUsbDapCom", disable_usb_dap);
 
     const char *sys_info = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, sys_info);

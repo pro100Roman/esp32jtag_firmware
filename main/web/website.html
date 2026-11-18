@@ -504,6 +504,22 @@
       </div>
 
       <div class="panel">
+        <h3>USB Interface</h3>
+        <div class="form-row">
+          <label for="disable-usb-dap" style="text-align: left; margin: 0;">
+            Disable USB CMSIS-DAP and COM
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="disable-usb-dap">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div style="font-size: 0.82em; color: #666;">
+          Applied after restart. CMSIS-DAP over the network remains available.
+        </div>
+      </div>
+
+      <div class="panel">
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
           <label for="sreset-polarity" style="display: inline-block; width: 120px; font-size: 0.9em;">SRESET Polarity</label>
           <select id="sreset-polarity" style="width: 190px;">
@@ -755,7 +771,8 @@
         if (data.uartStopBits) document.getElementById("uart-sbits").value = data.uartStopBits;
         if (data.uartParity) document.getElementById("uart-parity").value = data.uartParity;
 
-        // disableUsbDapCom is fixed — not loaded from server
+        document.getElementById("disable-usb-dap").checked =
+          data.disableUsbDapCom === true;
       }
 
 
@@ -888,7 +905,7 @@
         // Fixed values: not user-configurable
         var mcuInterface = "GPIO";
 
-        var disableUsbDapCom = true;
+        var disableUsbDapCom = document.getElementById("disable-usb-dap").checked;
 
         // Validation: SSID required for Station Mode
         if (wifiMode === "SM" && ssid === "") {
