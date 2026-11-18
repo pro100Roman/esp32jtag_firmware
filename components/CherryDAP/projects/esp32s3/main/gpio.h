@@ -21,15 +21,18 @@ static inline void gpio_set_mode(uint32_t pin, uint32_t mode)
 {
     if (mode == GPIO_INPUT_MODE)
     {
+        gpio_ll_input_enable(&GPIO, pin);
         gpio_ll_output_disable(&GPIO, pin);
     }
     else if (mode == GPIO_OUTPUT_MODE)
     {
+        gpio_ll_input_disable(&GPIO, pin);
         gpio_ll_output_enable(&GPIO, pin);
     }
     else if (mode == GPIO_INPUT_PP_MODE)
     {
         gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
+        gpio_ll_input_enable(&GPIO, pin);
         gpio_ll_output_disable(&GPIO, pin);
     }
 }
